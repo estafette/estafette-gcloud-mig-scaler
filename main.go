@@ -152,6 +152,8 @@ func main() {
 			// loop through configs
 			for _, configItem := range migConfigs {
 
+				log.Info().Msgf("Retrieving data for managed instance group %v scaling...", configItem.InstanceGroupName)
+
 				// get request rate with prometheus query
 				// https://prometheus-production.travix.com/api/v1/query?query=sum%28rate%28nginx_http_requests_total%7Bhost%21~%22%5E%28%3F%3A%5B0-9.%5D%2B%29%24%22%2Clocation%3D%22%40searchfareapi_gcloud%22%7D%5B10m%5D%29%29%20by%20%28location%29
 				prometheusQueryURL := fmt.Sprintf("%v/api/v1/query?query=%v", *prometheusURL, url.QueryEscape(configItem.RequestRateQuery))
@@ -174,8 +176,6 @@ func main() {
 					log.Warn().Err(err).Msgf("Unmarshalling prometheus query response body for mig %v failed", configItem.InstanceGroupName)
 					continue
 				}
-
-				log.Info().Interface("queryResponse", queryResponse).Msgf("Retrieving prometheus query response for mig %v is successful", configItem.InstanceGroupName)
 
 				requestRate, err := queryResponse.GetRequestRate()
 				if err != nil {
@@ -203,6 +203,8 @@ func main() {
 					continue
 				}
 				migTargetSize := instanceGroupManager.TargetSize
+
+				log.Info().Msgf("Setting data for managed instance group %v in prometheus (min: %v, actual: %v, source request rate:%v)...", configItem.InstanceGroupName, minimumNumberOfInstances, migTargetSize, requestRate)
 
 				// set prometheus gauge values
 				minInstancesVector.WithLabelValues(configItem.InstanceGroupName).Set(float64(minimumNumberOfInstances))
