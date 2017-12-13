@@ -2,9 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	stdlog "log"
+	"math"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"runtime"
@@ -15,12 +20,24 @@ import (
 	"github.com/alecthomas/kingpin"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/sethgrid/pester"
 	"golang.org/x/oauth2/google"
 	compute "google.golang.org/api/compute/v1"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+// MIGConfiguration has all the config needed for a single managed instance group to be scaled
+type MIGConfiguration struct {
+	GCloudProject                string  `json:"gcloudProject"`
+	GCloudZone                   string  `json:"gcloudZone"`
+	RequestRateQuery             string  `json:"requestRateQuery"`
+	InstanceGroupName            string  `json:"instanceGroupName"`
+	MinimumNumberOfInstances     int     `json:"minimumNumberOfInstances"`
+	NumberOfRequestsPerInstance  float64 `json:"numberOfRequestsPerInstance"`
+	NumberOfInstancesBelowTarget int     `json:"numberOfInstancesBelowTarget"`
+}
 
 var (
 	version   string
@@ -35,34 +52,34 @@ var (
 	prometheusMetricsAddress = kingpin.Flag("metrics-listen-address", "The address to listen on for Prometheus metrics requests.").Envar("PROMETHEUS_METRICS_PORT").Default(":9101").String()
 	prometheusMetricsPath    = kingpin.Flag("metrics-path", "The path to listen for Prometheus metrics requests.").Envar("PROMETHEUS_METRICS_PATH").Default("/metrics").String()
 	prometheusURL            = kingpin.Flag("prometheus-url", "The url to the Prometheus server).").Envar("PROMETHEUS_URL").String()
-	googleComputeRegions     = kingpin.Flag("mig-config", "A comma-separated list of all managed instance groups, the Prometheus query to fetch request rate with, the target requests per instance.").Envar("MIG_CONFIG").String()
+	migConfig                = kingpin.Flag("mig-config", "A json array of configuration for all managed instance groups, the Prometheus query to fetch request rate with, the target requests per instance.").Envar("MIG_CONFIG").String()
 
 	// seed random number
 	r = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	// create gauge for tracking minimum number of instances per managed instance group
-	minInstances = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	minInstancesVector = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "estafette_gcloud_mig_min_instances",
 		Help: "The minimum number of instances per managed instance group as set by this application.",
 	}, []string{"mig"})
 
 	// create gauge for tracking actual number of instances per managed instance group
-	actualInstances = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	actualInstancesVector = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "estafette_gcloud_actual_min_instances",
 		Help: "The actual number of instances per managed instance group as set by this application.",
 	}, []string{"mig"})
 
 	// create gauge for tracking request rate used to set minimum number of instances per managed instance group
-	requestRate = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	requestRateVector = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "estafette_gcloud_request_rate",
 		Help: "The request rate used for setting minimum number of instances per managed instance group as set by this application.",
 	}, []string{"mig"})
 )
 
 func init() {
-	prometheus.MustRegister(minInstances)
-	prometheus.MustRegister(actualInstances)
-	prometheus.MustRegister(requestRate)
+	prometheus.MustRegister(minInstancesVector)
+	prometheus.MustRegister(actualInstancesVector)
+	prometheus.MustRegister(requestRateVector)
 }
 
 func main() {
@@ -110,6 +127,13 @@ func main() {
 		}
 	}()
 
+	var migConfigs []MIGConfiguration
+
+	if err := json.Unmarshal([]byte(*migConfig), &migConfigs); err != nil {
+		// couldn't deserialize, setting to default struct
+		log.Fatal().Err(err).Msg("Unmarshalling migConfig failed")
+	}
+
 	ctx := context.Background()
 	client, err := google.DefaultClient(ctx, compute.CloudPlatformScope)
 	if err != nil {
@@ -125,7 +149,66 @@ func main() {
 	go func(waitGroup *sync.WaitGroup) {
 		// loop indefinitely
 		for {
-			// do work
+			// loop through configs
+			for _, configItem := range migConfigs {
+
+				// get request rate with prometheus query
+				// https://prometheus-production.travix.com/api/v1/query?query=sum%28rate%28nginx_http_requests_total%7Bhost%21~%22%5E%28%3F%3A%5B0-9.%5D%2B%29%24%22%2Clocation%3D%22%40searchfareapi_gcloud%22%7D%5B10m%5D%29%29%20by%20%28location%29
+				prometheusQueryURL := fmt.Sprintf("%v/api/v1/query?query=%v", *prometheusURL, url.QueryEscape(configItem.RequestRateQuery))
+				resp, err := pester.Get(prometheusQueryURL)
+				if err != nil {
+					log.Warn().Err(err).Msgf("Executing prometheus query for mig %v failed", configItem.InstanceGroupName)
+					continue
+				}
+
+				defer resp.Body.Close()
+
+				body, err := ioutil.ReadAll(resp.Body)
+				if err != nil {
+					log.Warn().Err(err).Msgf("Reading prometheus query response body for mig %v failed", configItem.InstanceGroupName)
+					continue
+				}
+
+				queryResponse, err := UnmarshalPrometheusQueryResponse(body)
+				if err != nil {
+					log.Warn().Err(err).Msgf("Unmarshalling prometheus query response body for mig %v failed", configItem.InstanceGroupName)
+					continue
+				}
+
+				log.Info().Interface("queryResponse", queryResponse).Msgf("Retrieving prometheus query response for mig %v is successful", configItem.InstanceGroupName)
+
+				requestRate, err := queryResponse.GetRequestRate()
+				if err != nil {
+					log.Warn().Err(err).Msgf("Retrieving request rate from query response body for mig %v failed", configItem.InstanceGroupName)
+					continue
+				}
+
+				// calculate target # of instances
+				targetNumberOfInstances := int(math.Ceil(requestRate / configItem.NumberOfRequestsPerInstance))
+
+				// substract number of instances below target
+				minimumNumberOfInstances := targetNumberOfInstances - configItem.NumberOfInstancesBelowTarget
+
+				// ensure minimumNumberOfInstances is larger than MinimumNumberOfInstances from the config
+				if minimumNumberOfInstances < configItem.MinimumNumberOfInstances {
+					minimumNumberOfInstances = configItem.MinimumNumberOfInstances
+				}
+
+				// set min instances on managed instance group
+
+				// get actual number of instances
+				instanceGroupManager, err := computeService.InstanceGroupManagers.Get(configItem.GCloudProject, configItem.GCloudZone, configItem.InstanceGroupName).Context(ctx).Do()
+				if err != nil {
+					log.Warn().Err(err).Msgf("Retrieving instance group manager %v failed", configItem.InstanceGroupName)
+					continue
+				}
+				migTargetSize := instanceGroupManager.TargetSize
+
+				// set prometheus gauge values
+				minInstancesVector.WithLabelValues(configItem.InstanceGroupName).Set(float64(minimumNumberOfInstances))
+				actualInstancesVector.WithLabelValues(configItem.InstanceGroupName).Set(float64(migTargetSize))
+				requestRateVector.WithLabelValues(configItem.InstanceGroupName).Set(requestRate)
+			}
 
 			// sleep random time between 60s +- 25%
 			sleepTime := applyJitter(60)
