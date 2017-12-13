@@ -59,19 +59,19 @@ var (
 
 	// create gauge for tracking minimum number of instances per managed instance group
 	minInstancesVector = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "estafette_gcloud_mig_min_instances",
+		Name: "estafette_gcloud_mig_scaler_min_instances",
 		Help: "The minimum number of instances per managed instance group as set by this application.",
 	}, []string{"mig"})
 
 	// create gauge for tracking actual number of instances per managed instance group
 	actualInstancesVector = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "estafette_gcloud_actual_min_instances",
+		Name: "estafette_gcloud_mig_scaler_actual_instances",
 		Help: "The actual number of instances per managed instance group as set by this application.",
 	}, []string{"mig"})
 
 	// create gauge for tracking request rate used to set minimum number of instances per managed instance group
 	requestRateVector = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "estafette_gcloud_request_rate",
+		Name: "estafette_gcloud_mig_scaler_request_rate",
 		Help: "The request rate used for setting minimum number of instances per managed instance group as set by this application.",
 	}, []string{"mig"})
 )
