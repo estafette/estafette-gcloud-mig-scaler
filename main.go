@@ -160,7 +160,7 @@ func main() {
 				prometheusQueryURL := fmt.Sprintf("%v/api/v1/query?query=%v", *prometheusURL, url.QueryEscape(configItem.RequestRateQuery))
 				resp, err := pester.Get(prometheusQueryURL)
 				if err != nil {
-					log.Warn().Err(err).Msgf("Executing prometheus query for mig %v failed", configItem.InstanceGroupName)
+					log.Error().Err(err).Msgf("Executing prometheus query for mig %v failed", configItem.InstanceGroupName)
 					continue
 				}
 
@@ -168,19 +168,19 @@ func main() {
 
 				body, err := ioutil.ReadAll(resp.Body)
 				if err != nil {
-					log.Warn().Err(err).Msgf("Reading prometheus query response body for mig %v failed", configItem.InstanceGroupName)
+					log.Error().Err(err).Msgf("Reading prometheus query response body for mig %v failed", configItem.InstanceGroupName)
 					continue
 				}
 
 				queryResponse, err := UnmarshalPrometheusQueryResponse(body)
 				if err != nil {
-					log.Warn().Err(err).Msgf("Unmarshalling prometheus query response body for mig %v failed", configItem.InstanceGroupName)
+					log.Error().Err(err).Msgf("Unmarshalling prometheus query response body for mig %v failed", configItem.InstanceGroupName)
 					continue
 				}
 
 				requestRate, err := queryResponse.GetRequestRate()
 				if err != nil {
-					log.Warn().Err(err).Msgf("Retrieving request rate from query response body for mig %v failed", configItem.InstanceGroupName)
+					log.Error().Err(err).Msgf("Retrieving request rate from query response body for mig %v failed", configItem.InstanceGroupName)
 					continue
 				}
 
@@ -198,7 +198,7 @@ func main() {
 				// get actual number of instances
 				instanceGroupManager, err := computeService.InstanceGroupManagers.Get(configItem.GCloudProject, configItem.GCloudZone, configItem.InstanceGroupName).Context(ctx).Do()
 				if err != nil {
-					log.Warn().Err(err).Msgf("Retrieving instance group manager %v failed", configItem.InstanceGroupName)
+					log.Error().Err(err).Msgf("Retrieving instance group manager %v failed", configItem.InstanceGroupName)
 					continue
 				}
 				migTargetSize := instanceGroupManager.TargetSize
@@ -212,18 +212,27 @@ func main() {
 
 				// set min instances on managed instance group
 				if configItem.EnableSettingMinInstances {
+
 					// retrieve autoscaler
-					autoScaler, err := computeService.Autoscalers.Get(configItem.GCloudProject, configItem.GCloudZone, configItem.InstanceGroupName).Context(ctx).Do()
+					filter := fmt.Sprintf("target eq %v", instanceGroupManager.SelfLink)
+					autoscalerList, err := computeService.Autoscalers.List(configItem.GCloudProject, configItem.GCloudZone).Filter(filter).Context(ctx).Do()
 					if err != nil {
-						log.Warn().Err(err).Msgf("Retrieving autoscaler %v failed", configItem.InstanceGroupName)
+						log.Error().Err(err).Msgf("Retrieving autoscaler %v failed", configItem.InstanceGroupName)
 						continue
 					}
+
+					if len(autoscalerList.Items) != 0 {
+						log.Warn().Msgf("An incorrect number of %v autoscalers for mig %v were retrieved, ", len(autoscalerList.Items), configItem.InstanceGroupName)
+						continue
+					}
+
+					autoScaler := autoscalerList.Items[0]
 
 					// update autoscaler
 					autoScaler.AutoscalingPolicy.MinNumReplicas = int64(minimumNumberOfInstances)
 					operation, err := computeService.Autoscalers.Update(configItem.GCloudProject, configItem.GCloudZone, autoScaler).Context(ctx).Do()
 					if err != nil {
-						log.Warn().Err(err).Msgf("Updating autoscaler %v failed", configItem.InstanceGroupName)
+						log.Error().Err(err).Msgf("Updating autoscaler %v failed", configItem.InstanceGroupName)
 						continue
 					}
 
