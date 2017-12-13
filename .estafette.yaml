@@ -1,0 +1,63 @@
+builder:
+  track: dev
+
+labels:
+  app: estafette-gcloud-mig-scaler
+  team: estafette-team
+  language: golang
+
+version:
+  semver:
+    major: 1
+    minor: 0
+    patch: '{{auto}}'
+    labelTemplate: '{{branch}}'
+    releaseBranch: master
+
+pipelines:
+  set-pending-build-status:
+    image: extensions/github-status:dev
+    status: pending
+    when:
+      server == 'estafette'
+
+  build:
+    image: golang:1.9.0-alpine3.6
+    workDir: /go/src/github.com/estafette/${ESTAFETTE_LABEL_APP}
+    commands:
+    - go test `go list ./... | grep -v /vendor/`
+    - CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags "-X main.version=${ESTAFETTE_BUILD_VERSION} -X main.revision=${ESTAFETTE_GIT_REVISION} -X main.branch=${ESTAFETTE_GIT_BRANCH} -X main.buildDate=${ESTAFETTE_BUILD_DATETIME}" -o ./publish/${ESTAFETTE_LABEL_APP} .
+
+  bake:
+    image: docker:17.06.1-ce
+    commands:
+    - cp Dockerfile ./publish
+    - cp /etc/ssl/certs/ca-certificates.crt ./publish
+    - docker build -t estafette/${ESTAFETTE_LABEL_APP}:${ESTAFETTE_BUILD_VERSION} ./publish
+
+  push-to-docker-hub:
+    image: docker:17.06.1-ce
+    env:
+      DOCKER_HUB_USERNAME: estafette.secret(D8gy3KO6Fil7FaKs.KHLH6NCrIPtk6ObXaC_Y7i4xE2OY6QiorA==)
+      DOCKER_HUB_PASSWORD: estafette.secret(ZpEKNFi_HPbvD_9g.Ugs4lPe9GgXgTKkfmSaE6A7yotFfxRilGRMV3DIEox2UmqdK)
+    commands:
+    - docker login --username=${DOCKER_HUB_USERNAME} --password="${DOCKER_HUB_PASSWORD}"
+    - docker push estafette/${ESTAFETTE_LABEL_APP}:${ESTAFETTE_BUILD_VERSION}
+    when:
+      status == 'succeeded' &&
+      branch == 'master' &&
+      server == 'gocd'
+
+  set-build-status:
+    image: extensions/github-status:dev
+    when:
+      server == 'estafette'
+
+  slack-notify:
+    image: extensions/slack-build-status:dev
+    webhook: estafette.secret(49oDHA1GU2Y9uNr9.1_rY9ehRjYRsHnVoW-_CcP70z2EvWYgcb3U7BteamAQgx6iXo_Zrgcf_ESs4AgvhA_o20FPllOoX6GoZ4VvZqepcS5KaOIi032ljAPDSO8-7xveayDxl63XGqp2c)
+    name: ${ESTAFETTE_LABEL_APP}
+    channels:
+    - '#build-status'
+    when:
+      status == 'failed'
