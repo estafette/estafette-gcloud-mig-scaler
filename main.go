@@ -37,6 +37,7 @@ type MIGConfiguration struct {
 	MinimumNumberOfInstances     int     `json:"minimumNumberOfInstances"`
 	NumberOfRequestsPerInstance  float64 `json:"numberOfRequestsPerInstance"`
 	NumberOfInstancesBelowTarget int     `json:"numberOfInstancesBelowTarget"`
+	EnableSettingMinInstances    bool    `json:"enableSettingMinInstances"`
 }
 
 var (
@@ -194,8 +195,6 @@ func main() {
 					minimumNumberOfInstances = configItem.MinimumNumberOfInstances
 				}
 
-				// set min instances on managed instance group
-
 				// get actual number of instances
 				instanceGroupManager, err := computeService.InstanceGroupManagers.Get(configItem.GCloudProject, configItem.GCloudZone, configItem.InstanceGroupName).Context(ctx).Do()
 				if err != nil {
@@ -210,6 +209,26 @@ func main() {
 				minInstancesVector.WithLabelValues(configItem.InstanceGroupName).Set(float64(minimumNumberOfInstances))
 				actualInstancesVector.WithLabelValues(configItem.InstanceGroupName).Set(float64(migTargetSize))
 				requestRateVector.WithLabelValues(configItem.InstanceGroupName).Set(requestRate)
+
+				// set min instances on managed instance group
+				if configItem.EnableSettingMinInstances {
+					// retrieve autoscaler
+					autoScaler, err := computeService.Autoscalers.Get(configItem.GCloudProject, configItem.GCloudZone, configItem.InstanceGroupName).Context(ctx).Do()
+					if err != nil {
+						log.Warn().Err(err).Msgf("Retrieving autoscaler %v failed", configItem.InstanceGroupName)
+						continue
+					}
+
+					// update autoscaler
+					autoScaler.AutoscalingPolicy.MinNumReplicas = int64(minimumNumberOfInstances)
+					operation, err := computeService.Autoscalers.Update(configItem.GCloudProject, configItem.GCloudZone, autoScaler).Context(ctx).Do()
+					if err != nil {
+						log.Warn().Err(err).Msgf("Updating autoscaler %v failed", configItem.InstanceGroupName)
+						continue
+					}
+
+					log.Info().Interface("operation", *operation).Msgf("Updated autoscaler %v", configItem.InstanceGroupName)
+				}
 			}
 
 			// sleep random time between 60s +- 25%
