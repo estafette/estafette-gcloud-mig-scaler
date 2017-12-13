@@ -47,7 +47,7 @@ spec:
         - name: "PROMETHEUS_URL"
           value: "${PROMETHEUS_URL}"
         - name: "MIG_CONFIG"
-          value: "${MIG_CONFIG}"
+          value: '${MIG_CONFIG}'
         resources:
           requests:
             cpu: ${CPU_REQUEST}
