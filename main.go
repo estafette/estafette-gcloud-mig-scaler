@@ -229,14 +229,18 @@ func main() {
 					autoScaler := autoscalerList.Items[0]
 
 					// update autoscaler
-					autoScaler.AutoscalingPolicy.MinNumReplicas = int64(minimumNumberOfInstances)
-					operation, err := computeService.Autoscalers.Update(configItem.GCloudProject, configItem.GCloudZone, autoScaler).Context(ctx).Do()
-					if err != nil {
-						log.Error().Err(err).Msgf("Updating autoscaler %v failed", configItem.InstanceGroupName)
-						continue
-					}
+					if autoScaler.AutoscalingPolicy.MinNumReplicas != int64(minimumNumberOfInstances) {
+						autoScaler.AutoscalingPolicy.MinNumReplicas = int64(minimumNumberOfInstances)
+						operation, err := computeService.Autoscalers.Update(configItem.GCloudProject, configItem.GCloudZone, autoScaler).Context(ctx).Do()
+						if err != nil {
+							log.Error().Err(err).Msgf("Updating autoscaler %v failed", configItem.InstanceGroupName)
+							continue
+						}
 
-					log.Info().Interface("operation", *operation).Msgf("Updated autoscaler %v", configItem.InstanceGroupName)
+						log.Info().Interface("operation", *operation).Msgf("Updated autoscaler for mig %v to min instances %v", configItem.InstanceGroupName, minimumNumberOfInstances)
+					} else {
+						log.Info().Msgf("Skipped updating autoscaler for mig %v, min instances is already at %v", configItem.InstanceGroupName, minimumNumberOfInstances)
+					}
 				}
 			}
 
