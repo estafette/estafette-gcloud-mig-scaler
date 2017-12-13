@@ -221,8 +221,8 @@ func main() {
 						continue
 					}
 
-					if len(autoscalerList.Items) != 0 {
-						log.Warn().Msgf("An incorrect number of %v autoscalers for mig %v were retrieved, ", len(autoscalerList.Items), configItem.InstanceGroupName)
+					if len(autoscalerList.Items) != 1 {
+						log.Warn().Msgf("An incorrect number of %v autoscalers for mig %v were retrieved", len(autoscalerList.Items), configItem.InstanceGroupName)
 						continue
 					}
 
