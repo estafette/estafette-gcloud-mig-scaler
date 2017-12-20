@@ -22,6 +22,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/sethgrid/pester"
 	"golang.org/x/oauth2/google"
+	computebeta "google.golang.org/api/compute/v0.beta"
 	compute "google.golang.org/api/compute/v1"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -30,14 +31,15 @@ import (
 
 // MIGConfiguration has all the config needed for a single managed instance group to be scaled
 type MIGConfiguration struct {
-	GCloudProject                string  `json:"gcloudProject"`
-	GCloudZone                   string  `json:"gcloudZone"`
-	RequestRateQuery             string  `json:"requestRateQuery"`
-	InstanceGroupName            string  `json:"instanceGroupName"`
-	MinimumNumberOfInstances     int     `json:"minimumNumberOfInstances"`
-	NumberOfRequestsPerInstance  float64 `json:"numberOfRequestsPerInstance"`
-	NumberOfInstancesBelowTarget int     `json:"numberOfInstancesBelowTarget"`
-	EnableSettingMinInstances    bool    `json:"enableSettingMinInstances"`
+	GCloudProject                string  `json:"gcloudProject,omitempty"`
+	GCloudZone                   string  `json:"gcloudZone,omitempty"`
+	GCloudRegion                 string  `json:"gcloudRegion,omitempty"`
+	RequestRateQuery             string  `json:"requestRateQuery,omitempty"`
+	InstanceGroupName            string  `json:"instanceGroupName,omitempty"`
+	MinimumNumberOfInstances     int     `json:"minimumNumberOfInstances,omitempty"`
+	NumberOfRequestsPerInstance  float64 `json:"numberOfRequestsPerInstance,omitempty"`
+	NumberOfInstancesBelowTarget int     `json:"numberOfInstancesBelowTarget,omitempty"`
+	EnableSettingMinInstances    bool    `json:"enableSettingMinInstances,omitempty"`
 }
 
 var (
@@ -141,7 +143,7 @@ func main() {
 		log.Fatal().Err(err).Msg("Creating google cloud client failed")
 	}
 
-	computeService, err := compute.New(client)
+	computeService, err := computebeta.New(client)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Creating google cloud service failed")
 	}
@@ -196,7 +198,12 @@ func main() {
 				}
 
 				// get actual number of instances
-				instanceGroupManager, err := computeService.InstanceGroupManagers.Get(configItem.GCloudProject, configItem.GCloudZone, configItem.InstanceGroupName).Context(ctx).Do()
+				var instanceGroupManager *computebeta.InstanceGroupManager
+				if configItem.GCloudRegion != "" {
+					instanceGroupManager, err = computeService.RegionInstanceGroupManagers.Get(configItem.GCloudProject, configItem.GCloudRegion, configItem.InstanceGroupName).Context(ctx).Do()
+				} else if configItem.GCloudZone != "" {
+					instanceGroupManager, err = computeService.InstanceGroupManagers.Get(configItem.GCloudProject, configItem.GCloudZone, configItem.InstanceGroupName).Context(ctx).Do()
+				}
 				if err != nil {
 					log.Error().Err(err).Msgf("Retrieving instance group manager %v failed", configItem.InstanceGroupName)
 					continue
@@ -215,31 +222,64 @@ func main() {
 
 					// retrieve autoscaler
 					filter := fmt.Sprintf("target eq %v", instanceGroupManager.SelfLink)
-					autoscalerList, err := computeService.Autoscalers.List(configItem.GCloudProject, configItem.GCloudZone).Filter(filter).Context(ctx).Do()
-					if err != nil {
-						log.Error().Err(err).Msgf("Retrieving autoscaler %v failed", configItem.InstanceGroupName)
-						continue
-					}
 
-					if len(autoscalerList.Items) != 1 {
-						log.Warn().Msgf("An incorrect number of %v autoscalers for mig %v were retrieved", len(autoscalerList.Items), configItem.InstanceGroupName)
-						continue
-					}
+					if configItem.GCloudRegion != "" {
+						autoscalerList, err := computeService.RegionAutoscalers.List(configItem.GCloudProject, configItem.GCloudRegion).Filter(filter).Context(ctx).Do()
 
-					autoScaler := autoscalerList.Items[0]
-
-					// update autoscaler
-					if autoScaler.AutoscalingPolicy.MinNumReplicas != int64(minimumNumberOfInstances) {
-						autoScaler.AutoscalingPolicy.MinNumReplicas = int64(minimumNumberOfInstances)
-						operation, err := computeService.Autoscalers.Update(configItem.GCloudProject, configItem.GCloudZone, autoScaler).Context(ctx).Do()
 						if err != nil {
-							log.Error().Err(err).Msgf("Updating autoscaler %v failed", configItem.InstanceGroupName)
+							log.Error().Err(err).Msgf("Retrieving autoscaler %v failed", configItem.InstanceGroupName)
 							continue
 						}
 
-						log.Info().Interface("operation", *operation).Msgf("Updated autoscaler for mig %v to min instances %v", configItem.InstanceGroupName, minimumNumberOfInstances)
-					} else {
-						log.Info().Msgf("Skipped updating autoscaler for mig %v, min instances is already at %v", configItem.InstanceGroupName, minimumNumberOfInstances)
+						if len(autoscalerList.Items) != 1 {
+							log.Warn().Msgf("An incorrect number of %v autoscalers for mig %v were retrieved", len(autoscalerList.Items), configItem.InstanceGroupName)
+							continue
+						}
+
+						autoScaler := autoscalerList.Items[0]
+
+						// update autoscaler
+						if autoScaler.AutoscalingPolicy.MinNumReplicas != int64(minimumNumberOfInstances) {
+							autoScaler.AutoscalingPolicy.MinNumReplicas = int64(minimumNumberOfInstances)
+							operation, err := computeService.RegionAutoscalers.Update(configItem.GCloudProject, configItem.GCloudRegion, autoScaler).Context(ctx).Do()
+							if err != nil {
+								log.Error().Err(err).Msgf("Updating autoscaler %v failed", configItem.InstanceGroupName)
+								continue
+							}
+
+							log.Info().Interface("operation", *operation).Msgf("Updated autoscaler for mig %v to min instances %v", configItem.InstanceGroupName, minimumNumberOfInstances)
+						} else {
+							log.Info().Msgf("Skipped updating autoscaler for mig %v, min instances is already at %v", configItem.InstanceGroupName, minimumNumberOfInstances)
+						}
+
+					} else if configItem.GCloudZone != "" {
+						autoscalerList, err := computeService.Autoscalers.List(configItem.GCloudProject, configItem.GCloudZone).Filter(filter).Context(ctx).Do()
+
+						if err != nil {
+							log.Error().Err(err).Msgf("Retrieving autoscaler %v failed", configItem.InstanceGroupName)
+							continue
+						}
+
+						if len(autoscalerList.Items) != 1 {
+							log.Warn().Msgf("An incorrect number of %v autoscalers for mig %v were retrieved", len(autoscalerList.Items), configItem.InstanceGroupName)
+							continue
+						}
+
+						autoScaler := autoscalerList.Items[0]
+
+						// update autoscaler
+						if autoScaler.AutoscalingPolicy.MinNumReplicas != int64(minimumNumberOfInstances) {
+							autoScaler.AutoscalingPolicy.MinNumReplicas = int64(minimumNumberOfInstances)
+							operation, err := computeService.Autoscalers.Update(configItem.GCloudProject, configItem.GCloudZone, autoScaler).Context(ctx).Do()
+							if err != nil {
+								log.Error().Err(err).Msgf("Updating autoscaler %v failed", configItem.InstanceGroupName)
+								continue
+							}
+
+							log.Info().Interface("operation", *operation).Msgf("Updated autoscaler for mig %v to min instances %v", configItem.InstanceGroupName, minimumNumberOfInstances)
+						} else {
+							log.Info().Msgf("Skipped updating autoscaler for mig %v, min instances is already at %v", configItem.InstanceGroupName, minimumNumberOfInstances)
+						}
 					}
 				}
 			}
