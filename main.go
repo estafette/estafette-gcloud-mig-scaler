@@ -170,19 +170,19 @@ func main() {
 
 				body, err := ioutil.ReadAll(resp.Body)
 				if err != nil {
-					log.Error().Err(err).Msgf("Reading prometheus query response body for mig %v failed", configItem.InstanceGroupName)
+					log.Error().Err(err).Msgf("Reading prometheus query (%v) response body for mig %v failed", prometheusQueryURL, configItem.InstanceGroupName)
 					continue
 				}
 
 				queryResponse, err := UnmarshalPrometheusQueryResponse(body)
 				if err != nil {
-					log.Error().Err(err).Msgf("Unmarshalling prometheus query response body for mig %v failed", configItem.InstanceGroupName)
+					log.Error().Err(err).Msgf("Unmarshalling prometheus query (%v) response body for mig %v failed", prometheusQueryURL, configItem.InstanceGroupName)
 					continue
 				}
 
 				requestRate, err := queryResponse.GetRequestRate()
 				if err != nil {
-					log.Error().Err(err).Msgf("Retrieving request rate from query response body for mig %v failed", configItem.InstanceGroupName)
+					log.Error().Err(err).Msgf("Retrieving request rate from query (%v) response body for mig %v failed", prometheusQueryURL, configItem.InstanceGroupName)
 					continue
 				}
 
