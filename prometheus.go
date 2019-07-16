@@ -44,7 +44,10 @@ func UnmarshalPrometheusQueryResponse(responseBody []byte) (queryResponse Promet
 
 // GetRequestRate converts the string value into a float64
 func (pqr *PrometheusQueryResponse) GetRequestRate() (float64, error) {
-	f, err := strconv.ParseFloat(pqr.Data.Result[0].Value[1].(string), 64)
-
+	if len(pqr.Data.Result) > 0 {
+		f, err := strconv.ParseFloat(pqr.Data.Result[0].Value[1].(string), 64)
+	} else {
+		err := "Empty response"
+	}
 	return f, err
 }
