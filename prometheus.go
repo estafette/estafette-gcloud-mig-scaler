@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"strconv"
+	"errors"
 
 	"github.com/rs/zerolog/log"
 )
@@ -43,11 +44,11 @@ func UnmarshalPrometheusQueryResponse(responseBody []byte) (queryResponse Promet
 }
 
 // GetRequestRate converts the string value into a float64
-func (pqr *PrometheusQueryResponse) GetRequestRate() (float64, error) {
+func (pqr *PrometheusQueryResponse) GetRequestRate() (f float64, err error) {
 	if len(pqr.Data.Result) > 0 {
-		f, err := strconv.ParseFloat(pqr.Data.Result[0].Value[1].(string), 64)
+		f, err = strconv.ParseFloat(pqr.Data.Result[0].Value[1].(string), 64)
 	} else {
-		err := "Empty response"
+		err = errors.New("Empty response")
 	}
-	return f, err
+	return
 }
