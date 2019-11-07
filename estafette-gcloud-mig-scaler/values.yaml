@@ -1,0 +1,97 @@
+# Default values for estafette-gcloud-mig-scaler.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+image:
+  repository: estafette/estafette-gcloud-mig-scaler
+  # The tag can be set to override the appVersion getting used as the image tag
+  tag:
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name:
+
+rbac:
+  # Specifies whether roles and bindings should be created
+  enable: true
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 15Mi
+  limits:
+    cpu: 25m
+    memory: 50Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 10
+      preference:
+        matchExpressions:
+        - key: cloud.google.com/gke-preemptible
+          operator: In
+          values:
+          - "true"
+
+# url to prometheus server that can be queried for the manage instance group request rates
+prometheusUrl:
+
+# json array with configuration objects for multiple managed instance groups to scale them depending on request rate retrieved from prometheus
+# [
+#   {
+#     "gcloudProject":"project-id",
+#     "gcloudRegion":"europe-west1",
+#     "requestRateQuery":"sum(rate(nginx_http_requests_total{host!~\"^(?:[0-9.]+)$\",location=\"@applicationname\"}[10m])) by (location)",
+#     "instanceGroupName":"instance-group-name",
+#     "minimumNumberOfInstances":3,
+#     "numberOfRequestsPerInstance":5.8,
+#     "numberOfInstancesBelowTarget":2,
+#     "enableSettingMinInstances":true
+#   }
+# ]
+managedInstanceGroupConfig: []
+
+# pass (additional) arguments to the container
+extraArgs: []
+
+# use to set extra environment variables
+extraEnv: {}
+
+# use to add extra labels
+extraLabels: {}
+
+# use to add extra labels to podspec for getting their values in prometheus
+extraPodLabels: {}
+
+secret:
+  # when using estafette-gcp-service account controller to fetch key files, set this to true and leave googleServiceAccountKeyfileJson empty
+  useGcpServiceAccountAnnotation: false
+
+  # sets a json keyfile for a gcp service account
+  googleServiceAccountKeyfileJson: '{"type": "service_account"}'
