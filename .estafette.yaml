@@ -107,5 +107,5 @@ releases:
 
       create-github-release:
         image: extensions/github-release:dev
-        version: ${ESTAFETTE_BUILD_VERSION_MAJOR}.${ESTAFETTE_BUILD_VERSION_MINOR}.0
+        version: ${ESTAFETTE_BUILD_VERSION}
         closeMilestone: true
