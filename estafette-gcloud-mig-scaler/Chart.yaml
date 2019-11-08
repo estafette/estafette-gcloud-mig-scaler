@@ -3,3 +3,4 @@ appVersion: "1.0"
 description: Controller to scale a Google Cloud managed instance groups based on request rate retrieved from Prometheus
 name: estafette-gcloud-mig-scaler
 version: 0.1.0
+icon: https://estafette.io/apple-touch-icon.png
