@@ -12,3 +12,7 @@
 
 # Project-local glide cache, RE: https://github.com/Masterminds/glide/issues/736
 .glide/
+
+# ignore build and helm artifacts
+/estafette-gcloud-mig-scaler
+/estafette-gcloud-mig-scaler-*.tgz
