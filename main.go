@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	stdlog "log"
 	"math"
 	"math/rand"
 	"net/http"
@@ -18,7 +17,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kingpin"
-	"github.com/rs/zerolog"
+	foundation "github.com/estafette/estafette-foundation"
 	"github.com/rs/zerolog/log"
 	"github.com/sethgrid/pester"
 	"golang.org/x/oauth2/google"
@@ -43,6 +42,8 @@ type MIGConfiguration struct {
 }
 
 var (
+	appgroup  string
+	app       string
 	version   string
 	branch    string
 	revision  string
@@ -90,27 +91,8 @@ func main() {
 	// parse command line parameters
 	kingpin.Parse()
 
-	// log as severity for stackdriver logging to recognize the level
-	zerolog.LevelFieldName = "severity"
-
-	// set some default fields added to all logs
-	log.Logger = zerolog.New(os.Stdout).With().
-		Timestamp().
-		Str("app", "estafette-gcloud-mig-scaler").
-		Str("version", version).
-		Logger()
-
-	// use zerolog for any logs sent via standard log library
-	stdlog.SetFlags(0)
-	stdlog.SetOutput(log.Logger)
-
-	// log startup message
-	log.Info().
-		Str("branch", branch).
-		Str("revision", revision).
-		Str("buildDate", buildDate).
-		Str("goVersion", goVersion).
-		Msg("Starting estafette-gcloud-mig-scaler...")
+	// init log format from envvar ESTAFETTE_LOG_FORMAT
+	foundation.InitLoggingFromEnv(appgroup, app, version, branch, revision, buildDate)
 
 	// define channel and wait group to gracefully shutdown the application
 	gracefulShutdown := make(chan os.Signal)
